@@ -28,16 +28,20 @@ async function run(baseDir) {
       .split(/^(?=@@ )/m)
       // Keep only useless hunks which could be in the base commit
       .filter(hunk => {
+        // Keep the diff --git piece
         if (/^diff --git /.test(hunk)) {
           return true;
         }
+        // If somehow, there's something which isn't a true git hunk,
+        // drop it
         if (!/^@@ /.test(hunk)) {
           return false;
         }
-        return isHunkIgnorable(hunk);
+        // Only keep "trivial" hunks for the base commit
+        return isHunkTrivial(hunk);
       }),
     )
-    // If we didn't find any ignorable hunks, filter out
+    // If we didn't find any trivial hunks, filter out
     .filter(perFilePatch => perFilePatch.find(hunk => /^@@ /.test(hunk)))
     // Join the hunks back together
     .map(perFilePatch => perFilePatch.join(''))
@@ -45,27 +49,37 @@ async function run(baseDir) {
     .join('');
 
   if (!firstPatch) {
-    console.log('Found no ignorable hunks, no changes made');
+    console.log('Found no trivial hunks, no changes made');
     return;
   }
+
+
   console.log(firstPatch);
 }
 
-function isHunkIgnorable(hunk) {
+function isHunkTrivial(hunk) {
   const lines = hunk.split('\n');
   const removed = lines.filter(line => /^- /.test(line));
   const added = lines.filter(line => /^\+ /.test(line));
+
+  // If the changed line counts don't match then that's an easy sign
+  // that non-trivial changes exist in this hunk, and it should be
+  // kept prominent.
   if (added.length !== removed.length) {
     return false;
   }
+  // Safeguard in case we somehow get an empty hunk
   if (added.length === 0) {
     return false;
   }
   return removed.every((before, i) => {
     before = before.substr(1);
     const after = added[i].substr(1);
+    // Ensure for every line pair that the non-alpha characters all still match
     return before.replace(/\w/g, '') === after.replace(/\w/g, '')
-      && levenshteinEditDistance(before, after) < 3;
+      // and that the edit distance is under 3
+      && levenshteinEditDistance(before, after) < 3
+      && /ix/.test(after);
   });
 }
 
