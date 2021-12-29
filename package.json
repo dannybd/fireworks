@@ -1,0 +1,31 @@
+{
+  "name": "fireworks",
+  "version": "1.0.0",
+  "description": "Splitting SIBR JS update commits in twain to hide var renames",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dannybd/fireworks.git"
+  },
+  "keywords": [
+    "sibr",
+    "blaseball"
+  ],
+  "type": "module",
+  "author": "honu",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/dannybd/fireworks/issues"
+  },
+  "homepage": "https://github.com/dannybd/fireworks#readme",
+  "dependencies": {
+    "levenshtein-edit-distance": "^3.0.0",
+    "simple-git": "^2.48.0"
+  },
+  "devDependencies": {
+    "eslint": "^7.32.0"
+  }
+}
