@@ -1,14 +1,20 @@
+import {promises as fs} from 'fs';
 import {levenshteinEditDistance} from 'levenshtein-edit-distance';
 import * as path from 'path';
 import simpleGit from 'simple-git';
+import {file as tmpFile} from 'tmp-promise';
 
 
 const [repo] = process.argv.slice(2);
 const baseDir = path.resolve(process.cwd(), repo || '.');
 
-async function run(baseDir) {
-  const git = simpleGit({baseDir});
-  // console.log(`Running in ${baseDir}`);
+const git = simpleGit({baseDir});
+
+async function run() {
+  const currentBranch = await git.revparse([
+    '--abbrev-ref',
+    'HEAD',
+  ]);
 
   const status = await git.status();
   if (!status.isClean()) {
@@ -16,8 +22,43 @@ async function run(baseDir) {
     return;
   }
 
+  const trivialPatch = await createTrivialPatch();
+  if (!trivialPatch) {
+    console.log('Found no trivial hunks, no changes made');
+    return;
+  }
+
+  console.log('Patch created, saving to temp file');
+  const tmp = await tmpFile();
+  await fs.writeFile(tmp.path, trivialPatch);
+
+  console.log('Moving to parent commit');
+  await git.checkout('HEAD^');
+
+  console.log('Applying patch');
+  await git.applyPatch(tmp.path);
+
+  console.log('Cleaning up patch');
+  tmp.cleanup();
+
+  console.log('Creating trivial commit');
+  await git.commit('[ignore] auto-gen commit of webpack noise', ['-a']);
+
+  console.log('Rebasing on top of trivial commit');
+  await git.rebase([
+    'HEAD',
+    currentBranch,
+  ]);
+
+  console.log('Moving back to top');
+  await git.checkout(currentBranch);
+
+  console.log('Done!');
+}
+
+async function createTrivialPatch() {
   const fullPatch = await git.show();
-  const firstPatch = fullPatch
+  return fullPatch
     // Find each per-file patch
     .split(/^(?=diff --git )/m)
     // Only keep the ones which are JS files
@@ -32,8 +73,7 @@ async function run(baseDir) {
         if (/^diff --git /.test(hunk)) {
           return true;
         }
-        // If somehow, there's something which isn't a true git hunk,
-        // drop it
+        // If somehow, there's something which isn't a true git hunk, drop it
         if (!/^@@ /.test(hunk)) {
           return false;
         }
@@ -47,14 +87,6 @@ async function run(baseDir) {
     .map(perFilePatch => perFilePatch.join(''))
     // Join the files back together
     .join('');
-
-  if (!firstPatch) {
-    console.log('Found no trivial hunks, no changes made');
-    return;
-  }
-
-
-  console.log(firstPatch);
 }
 
 function isHunkTrivial(hunk) {
@@ -62,9 +94,11 @@ function isHunkTrivial(hunk) {
   const removed = lines.filter(line => /^- /.test(line));
   const added = lines.filter(line => /^\+ /.test(line));
 
-  // If the changed line counts don't match then that's an easy sign
-  // that non-trivial changes exist in this hunk, and it should be
-  // kept prominent.
+  /**
+   * If the changed line counts don't match then that's an easy sign
+   * that non-trivial changes exist in this hunk, and it should be
+   * kept prominent.
+   */
   if (added.length !== removed.length) {
     return false;
   }
@@ -75,12 +109,17 @@ function isHunkTrivial(hunk) {
   return removed.every((before, i) => {
     before = before.substr(1);
     const after = added[i].substr(1);
-    // Ensure for every line pair that the non-alpha characters all still match
-    return before.replace(/\w/g, '') === after.replace(/\w/g, '')
-      // and that the edit distance is under 3
-      && levenshteinEditDistance(before, after) < 3
-      && /ix/.test(after);
+    const varRegex = /\b[A-Za-z]\w?\b/ig;
+    const beforeWithoutVars = before.replace(varRegex, '');
+    const afterWithoutVars = after.replace(varRegex, '');
+    if (beforeWithoutVars !== afterWithoutVars) {
+      // Some non-trivial non-variable change!
+      return false;
+    }
+    const beforeVars = before.match(varRegex).join(' ');
+    const afterVars = after.match(varRegex).join(' ');
+    return levenshteinEditDistance(beforeVars, afterVars) < 4;
   });
 }
 
-run(baseDir);
+run();
